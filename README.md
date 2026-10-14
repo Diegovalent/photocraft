@@ -1,13 +1,9 @@
-<p align="center">
-  <a href="https://getartcraft.com/">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/brand/artcraft-logo-white.svg">
-      <img alt="ArtCraft" src="docs/brand/artcraft-logo.svg" width="200">
-    </picture>
-  </a>
-</p>
-
 <h1 align="center">PhotoCraft</h1>
+
+> **Compilação pessoal de Diegovalent.** Fork independente baseado no PhotoCraft da equipe ArtCraft.
+> [Baixar a versão Windows](https://github.com/Diegovalent/photocraft/releases/latest) · [Como instalar](docs/instalacao-windows.md).
+> Os instaladores deste fork não têm assinatura digital. A dependência `ruzstd` foi atualizada para 0.9.1 (RUSTSEC-2026-0344).
+> Esta compilação não é distribuída nem certificada pela equipe original.
 
 <p align="center">
   <b>Image editing; an open-source, clean-room reimplementation of Adobe Photoshop, rebuilt in pure Rust.</b><br>
@@ -426,7 +422,6 @@ Forks and modified versions must remove them.
 <sub>Adobe, Photoshop, Illustrator, Premiere Pro, Lightroom, Acrobat, After Effects and InDesign are trademarks or registered trademarks of Adobe Inc. in the United States and/or other countries. PhotoCraft is an independent, open-source project and is not affiliated with, sponsored by or endorsed by Adobe Inc.; these names are used only to describe the workflows it is compatible with.</sub>
 
 <p align="center">
-  <a href="https://getartcraft.com/"><img alt="ArtCraft" src="docs/brand/artcraft-mark.svg" width="28"></a><br>
   <sub>Made by the <a href="https://getartcraft.com/">ArtCraft</a> team and community.</sub>
 </p>
 

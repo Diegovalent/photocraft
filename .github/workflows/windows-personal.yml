@@ -1,0 +1,149 @@
+name: Instalador Windows pessoal
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/windows-personal.yml
+      - Cargo.lock
+      - crates/format/Cargo.toml
+      - crates/affinity/Cargo.toml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-personal-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: -C target-feature=+crt-static
+      PHOTOCRAFT_BUILD_SHA: ${{ github.sha }}
+      PHOTOCRAFT_NO_PRINT: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: clippy
+      - name: Check security dependency
+        shell: pwsh
+        run: |
+          $lock = Get-Content Cargo.lock -Raw
+          if ($lock -notmatch 'name = "ruzstd"\r?\nversion = "0\.9\.1"') {
+            throw 'ruzstd 0.9.1 must be locked before packaging'
+          }
+      - name: Install pinned WiX packaging tools
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          if ($LASTEXITCODE -ne 0) { throw 'WiX installation failed' }
+          wix extension add -g WixToolset.UI.wixext/5.0.2 WixToolset.Util.wixext/5.0.2
+          if ($LASTEXITCODE -ne 0) { throw 'WiX extension installation failed' }
+      - name: Build installer and portable package
+        shell: pwsh
+        run: |
+          $env:PHOTOCRAFT_BUILD_DATE = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+          ./packaging/windows/package.ps1 -Arch x64
+          if ($LASTEXITCODE -ne 0) { throw 'Windows packaging failed' }
+      - name: Test affected file readers
+        run: cargo test --release --target x86_64-pc-windows-msvc --locked -p photocraft-format -p photocraft-affinity --lib --tests
+      - name: Check affected crates with Clippy
+        run: cargo clippy --release --target x86_64-pc-windows-msvc --locked -p photocraft-format -p photocraft-affinity --all-targets -- -D warnings
+      - name: Install MSI and test installed executable
+        shell: pwsh
+        run: |
+          $msi = (Get-ChildItem dist/release/*-windows-x64.msi | Select-Object -First 1).FullName
+          $install = Join-Path $env:RUNNER_TEMP 'PhotoCraft-installed'
+          $log = Join-Path $env:RUNNER_TEMP 'photocraft-msi-install.log'
+          $args = @('/i', "`"$msi`"", '/qn', '/norestart', "INSTALLFOLDER=`"$install`"", '/L*v', "`"$log`"")
+          $p = Start-Process msiexec.exe -ArgumentList $args -Wait -PassThru
+          if ($p.ExitCode -notin @(0, 3010)) {
+            Get-Content $log -Tail 100
+            throw "MSI install failed: $($p.ExitCode)"
+          }
+          $cli = Join-Path $install 'photocraft-cli.exe'
+          if (-not (Test-Path (Join-Path $install 'photocraft.exe'))) { throw 'Installed GUI missing' }
+          & $cli --version
+          if ($LASTEXITCODE -ne 0) { throw 'Installed CLI failed to start' }
+          $sample = Join-Path $env:RUNNER_TEMP 'sample.ppm'
+          $png = Join-Path $env:RUNNER_TEMP 'sample.png'
+          $psd = Join-Path $env:RUNNER_TEMP 'sample.psd'
+          $roundtrip = Join-Path $env:RUNNER_TEMP 'roundtrip.png'
+          $header = [Text.Encoding]::ASCII.GetBytes("P6`n2 2`n255`n")
+          [byte[]] $pixels = @(255,0,0, 0,255,0, 0,0,255, 255,255,255)
+          [IO.File]::WriteAllBytes($sample, [byte[]]($header + $pixels))
+          & $cli convert $sample $png
+          if ($LASTEXITCODE -ne 0) { throw 'PPM to PNG failed' }
+          & $cli convert $png $psd
+          if ($LASTEXITCODE -ne 0) { throw 'PNG to PSD failed' }
+          & $cli convert $psd $roundtrip
+          if ($LASTEXITCODE -ne 0) { throw 'PSD to PNG failed' }
+          $signature = [Convert]::ToHexString([IO.File]::ReadAllBytes($roundtrip)[0..7])
+          if ($signature -ne '89504E470D0A1A0A') { throw 'Invalid exported PNG' }
+          & $cli info $psd
+          if ($LASTEXITCODE -ne 0) { throw 'PSD inspection failed' }
+          $p = Start-Process msiexec.exe -ArgumentList @('/x', "`"$msi`"", '/qn', '/norestart') -Wait -PassThru
+          if ($p.ExitCode -notin @(0, 3010)) { throw "MSI uninstall failed: $($p.ExitCode)" }
+      - name: Generate checksums and release notes
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem dist/release/* | Where-Object { $_.Extension -in @('.msi', '.zip') }
+          if ($files.Count -ne 2) { throw 'Expected one MSI and one portable ZIP' }
+          $files | Sort-Object Name | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          } | Set-Content dist/release/SHA256SUMS.txt -Encoding ascii
+          @"
+          Compilação independente de Diegovalent, baseada no PhotoCraft da equipe ArtCraft.
+
+          Windows 64 bits Intel/AMD: baixe o arquivo **windows-x64.msi** para instalar.
+          Alternativa: extraia o **windows-x64-portable.zip** e abra photocraft.exe.
+
+          Correção: ruzstd 0.9.1 (RUSTSEC-2026-0344).
+          Validação: testes dos leitores .pcraft/Affinity, Clippy, instalação/desinstalação MSI e conversão PNG/PSD com o executável instalado.
+
+          **Sem assinatura digital.** O Windows pode exibir aviso ou bloquear conforme sua política. Não desative o antivírus nem controles de segurança.
+          O aplicativo está em alfa; preserve cópias dos arquivos. Testes e checksums não constituem certificação de segurança.
+
+          Código-fonte: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/commit/$env:GITHUB_SHA
+          Execução: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID
+          "@ | Set-Content dist/release/RELEASE-NOTES.md -Encoding utf8
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: photocraft-windows-x64
+          path: dist/release/
+          if-no-files-found: error
+          retention-days: 14
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: photocraft-windows-x64
+          path: release
+      - name: Verify files and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cd release
+          sha256sum --check SHA256SUMS.txt
+          tag="windows-pessoal-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          gh release create "$tag" \
+            --target "$GITHUB_SHA" \
+            --title "PhotoCraft Windows — compilação pessoal ${GITHUB_RUN_NUMBER}" \
+            --notes-file RELEASE-NOTES.md \
+            --latest \
+            ./*.msi ./*.zip ./SHA256SUMS.txt

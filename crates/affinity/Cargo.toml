@@ -16,7 +16,8 @@ synth = []
 [dependencies]
 crc32fast = "1.5"
 flate2 = { workspace = true }
-ruzstd = "0.9"
+# RUSTSEC-2026-0344: reject decompression bombs inside the decoder.
+ruzstd = "0.9.1"
 
 [dev-dependencies]
 proptest = { workspace = true }
