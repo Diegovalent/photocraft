@@ -1,0 +1,45 @@
+name: Publicar PhotoCraft Web
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/photocraft-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: photocraft-pages
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download official PhotoCraft 0.8.2
+        run: |
+          curl --fail --location --retry 3 --output photocraft-web.zip \
+            https://github.com/storytold/photocraft/releases/download/v0.8.2/photocraft-web-0.8.2.zip
+          echo "490e4f3c242f2eee42f58446db8e7d468ac7abae3548b31a477e7fd43a7e92f4  photocraft-web.zip" | sha256sum --check
+          unzip -q photocraft-web.zip -d extracted
+          test -f extracted/photocraft-web-0.8.2/index.html
+          touch extracted/photocraft-web-0.8.2/.nojekyll
+      - name: Upload website
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: extracted/photocraft-web-0.8.2
+  deploy:
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publish website
+        id: deployment
+        uses: actions/deploy-pages@v4
